@@ -74,3 +74,26 @@ test("chart 5 ans : la clôture précédente est l'avant-dernière barre, pas ce
   assert.equal(b.quote.prev_close, 392.5);
   assert.ok(Math.abs(b.quote.pct_change - (387 / 392.5 - 1)) < 1e-12);
 });
+
+test("Finnhub : actions US en temps réel si la clé existe, Yahoo sinon", async () => {
+  const p = chartPayload("AAPL", 100, 99);
+  Object.assign(p.chart.result[0].meta, { exchangeTimezoneName: "America/New_York", instrumentType: "EQUITY" });
+  routes = { "/v8/finance/chart/AAPL": () => Response.json(p),
+    "finnhub.io/api/v1/quote": () => Response.json({ c: 101.5, pc: 99, h: 102, l: 98, o: 99.5, t: 1730000500 }) };
+  const withKey = await (await worker.fetch(new Request("https://w.example/quote?symbols=AAPL&k=1"), { ...env, FINNHUB_KEY: "test" }, ctx)).json();
+  assert.equal(withKey.quotes[0].price, 101.5);
+  assert.equal(withKey.quotes[0].source, "Finnhub");
+  assert.ok(Math.abs(withKey.quotes[0].pct_change - (101.5 / 99 - 1)) < 1e-12);
+  const noKey = await (await get("/quote?symbols=AAPL&k=2")).json();
+  assert.equal(noKey.quotes[0].price, 100);
+  assert.equal(noKey.quotes[0].source, "Yahoo Finance");
+});
+
+test("Finnhub en panne : on garde la cotation Yahoo", async () => {
+  const p = chartPayload("MSFT", 50, 49);
+  Object.assign(p.chart.result[0].meta, { exchangeTimezoneName: "America/New_York", instrumentType: "EQUITY" });
+  routes = { "/v8/finance/chart/MSFT": () => Response.json(p), "finnhub.io": () => new Response("limit", { status: 429 }) };
+  const b = await (await worker.fetch(new Request("https://w.example/quote?symbols=MSFT&k=3"), { ...env, FINNHUB_KEY: "test" }, ctx)).json();
+  assert.equal(b.quotes[0].price, 50);
+  assert.match(b.quotes[0].finnhub_error, /429/);
+});

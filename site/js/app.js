@@ -137,7 +137,8 @@ async function quotesFor(symbols) {
         const r = await live(`/quote?symbols=${symbols.slice(i, i + 40).map(encodeURIComponent).join(",")}`);
         r.quotes.forEach((q) => { out[q.symbol] = q; if (q.name) S.names.set(q.symbol, q.name); });
       }
-      return { quotes: out, src: "Yahoo Finance via Worker", upd: new Date().toISOString(), live: true };
+      const finnhub = Object.values(out).some((q) => q.source === "Finnhub");
+      return { quotes: out, src: finnhub ? "Finnhub (US stocks, real-time) + Yahoo Finance via Worker" : "Yahoo Finance via Worker", upd: new Date().toISOString(), live: true };
     } catch (e) {
       S.workerOk = false;
     }
@@ -228,7 +229,7 @@ async function renderMKTS() {
       <td class="white">${ok ? num(x.price, priceDigits(x.price)) : "n/a"}</td>
       <td class="${ok ? cls(x.change) : ""}">${ok ? signed(x.change, priceDigits(x.price)) : "n/a"}</td>
       <td class="${ok ? cls(x.change) : ""}">${ok ? pct(x.pct_change) : "n/a"}</td>
-      <td class="muted">${ok ? esc(x.time ? when(x.time) : when(x.as_of)) : esc((x && x.error) || (q.errors && (q.errors[s] || q.errors._all)) || "data unavailable")}</td>
+      <td class="muted">${ok ? esc((x.time ? when(x.time) : when(x.as_of)) + (x.source === "Finnhub" ? " | Finnhub" : "")) : esc((x && x.error) || (q.errors && (q.errors[s] || q.errors._all)) || "data unavailable")}</td>
       <td>${ok && q.live ? liveTag(x) : '<span class="tag delayed">DELAYED</span>'}</td></tr>`;
   }).join("");
 
@@ -253,6 +254,13 @@ async function renderMKTS() {
   if (q.live) S.timers.push(setInterval(() => { if (S.tab === "MKTS" && !document.hidden) refreshTab(true); }, (S.cfg.site.live_refresh_seconds || 15) * 1000));
 }
 
+function quoteHead(q, price, prev, dg, d) {
+  const chg = isNum(price) && isNum(prev) ? price - prev : null;
+  const src = q && q.source ? ` | ${q.source}` : "";
+  return `<div class="big">${num(price, dg)} <span class="${cls(chg)}" style="font-size:15px">${signed(chg, dg)} ${pct(isNum(prev) && prev ? chg / prev : null)}</span></div>
+    <div style="margin:4px 0 10px">${q ? liveTag(q) : '<span class="tag delayed">DELAYED</span>'} <span class="muted">${esc(q && q.time ? `${when(q.time)} (${ago(q.time)})${src}` : `close ${d.dates.at(-1)}`)}</span></div>`;
+}
+
 async function renderQUOTE() {
   const sym = S.symbol;
   if (!sym) { main().innerHTML = panel({ title: "Quote", body: `<div class="muted">Type a ticker in the command bar (e.g. AAPL, EURUSD, gold, CAC 40).</div>` }); return; }
@@ -260,8 +268,10 @@ async function renderQUOTE() {
   const d = await daily(sym, "5y");
   if (d.error) { main().innerHTML = panel({ title: `${sym} quote`, body: unavailable(`price history for ${sym}`, d.error) }); return; }
 
-  let q = d.quote;
-  if (!q && S.worker) { try { q = (await quotesFor([sym])).quotes[sym]; } catch { /* repli sur l'historique */ } }
+  // cotation fraîche (Finnhub pour les actions US si la clé est configurée), sinon celle du graphique
+  let q = null;
+  if (S.worker) { try { q = (await quotesFor([sym])).quotes[sym]; } catch { /* repli sur le graphique */ } }
+  if (!q || q.error || !isNum(q.price)) q = d.quote;
   const lastClose = [...d.close].reverse().find(isNum);
   const price = q && isNum(q.price) ? q.price : lastClose;
   const prev = q && isNum(q.prev_close) ? q.prev_close : d.close.filter(isNum).at(-2);
@@ -272,8 +282,7 @@ async function renderQUOTE() {
   if (name) S.names.set(sym, name);
 
   const rangeBtns = Object.keys(RANGES).map((r) => `<button data-range="${r}" class="${r === S.range ? "active" : ""}">${r}</button>`).join("");
-  const stats = `<div class="big">${num(price, dg)} <span class="${cls(chg)}" style="font-size:15px">${signed(chg, dg)} ${pct(isNum(prev) && prev ? chg / prev : null)}</span></div>
-    <div style="margin:4px 0 10px">${q ? liveTag(q) : '<span class="tag delayed">DELAYED</span>'} <span class="muted">${esc(q && q.time ? `${when(q.time)} (${ago(q.time)})` : `close ${d.dates.at(-1)}`)}</span></div>
+  const stats = `<div id="qhead">${quoteHead(q, price, prev, dg, d)}</div>
     <dl class="kv">
       <dt>Name</dt><dd>${esc(name || "n/a")}</dd>
       <dt>Exchange</dt><dd>${esc((q && q.exchange) || "n/a")}</dd>
@@ -291,7 +300,7 @@ async function renderQUOTE() {
   main().innerHTML =
     panel({ title: `${sym} ${name ? "| " + name : ""}`, span: 9, src: intraday ? "Yahoo Finance via Worker" : d.src, upd: d.upd,
       extra: `<div class="ranges">${rangeBtns}</div> ${star(sym)}`, body: `<div id="pchart" class="chart"></div>`, flush: true }) +
-    panel({ title: "Quote", span: 3, src: q ? "Yahoo Finance" : d.src, upd: q && q.time ? q.time : d.upd, body: stats }) + cbmBlock;
+    panel({ title: "Quote", span: 3, src: q ? (q.source || "Yahoo Finance") : d.src, upd: q && q.time ? q.time : d.upd, body: stats }) + cbmBlock;
 
   if (intraday) {
     const [range, interval] = RANGES[S.range];
@@ -309,6 +318,16 @@ async function renderQUOTE() {
       document.getElementById("pchart").outerHTML = unavailable("intraday chart", e.message);
     }
     return;
+  }
+  if (S.worker) {
+    S.timers.push(setInterval(async () => {
+      if (S.tab !== "QUOTE" || S.symbol !== sym || document.hidden) return;
+      try {
+        const fresh = (await quotesFor([sym])).quotes[sym];
+        const el = document.getElementById("qhead");
+        if (el && fresh && !fresh.error && isNum(fresh.price)) el.innerHTML = quoteHead(fresh, fresh.price, fresh.prev_close, dg, d);
+      } catch { /* on garde l'affichage précédent */ }
+    }, (S.cfg.site.live_refresh_seconds || 15) * 1000));
   }
   const idx = [];
   d.dates.forEach((t, i) => { if ([d.open[i], d.high[i], d.low[i], d.close[i]].every(isNum)) idx.push(i); });
@@ -676,7 +695,7 @@ function renderHELP() {
   ];
   main().innerHTML = panel({ title: "Commands", span: 7, body: `<table class="grid help"><tbody>${rows.map(([a, b]) => `<tr><td class="l"><code>${esc(a)}</code></td><td class="l">${esc(b)}</td></tr>`).join("")}</tbody></table>` }) +
     panel({ title: "Data policy", span: 5, body: `<p>Every number comes from a public source shown in the panel header (SRC) with its timestamp (UPD). If a source fails, the panel says DATA UNAVAILABLE with the error: nothing is filled in or simulated.</p>
-      <p><span class="tag live">LIVE</span> quote less than 2 minutes old, market open. <span class="tag delayed">DELAYED</span> older or cached quote. <span class="tag">CLOSE</span> market closed.</p>
+      <p><span class="tag live">LIVE</span> quote less than 2 minutes old, market open (US stocks from Finnhub when configured, real-time). <span class="tag delayed">DELAYED</span> older or cached quote. <span class="tag">CLOSE</span> market closed.</p>
       <p class="muted">Live layer: ${S.worker ? `Worker <span class="${S.workerOk ? "up" : "down"}">${S.workerOk ? "online" : "offline"}</span>` : "not configured, cached universe only"}.</p>` });
 }
 

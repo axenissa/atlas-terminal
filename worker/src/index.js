@@ -5,7 +5,7 @@
 // réponses en cache à la périphérie et n'utilise aucune clé API.
 //
 //   /search?q=apple                    recherche d'actifs (actions, indices, devises, ETF, crypto)
-//   /quote?symbols=AAPL,EURUSD=X       dernières cotations
+//   /quote?symbols=AAPL,EURUSD=X       dernières cotations (actions US en temps réel via Finnhub si FINNHUB_KEY)
 //   /chart?symbol=AAPL&range=1y&interval=1d
 //   /news?symbol=AAPL&q=AAPL+stock     titres Yahoo + Google News RSS
 //   /sec/concept?cik=320193&tag=NetIncomeLoss
@@ -114,19 +114,49 @@ function quoteFromChart(symbol, data, range = "1d") {
   };
 }
 
-async function quotes(params) {
+// --- Finnhub (temps réel actions US, clé gratuite en secret Cloudflare FINNHUB_KEY) ---
+
+const FINNHUB_SYMBOL_RE = /^[A-Z]{1,5}(-[A-Z])?$/;
+const FINNHUB_TYPES = new Set(["EQUITY", "ETF"]);
+
+function finnhubEligible(q, env) {
+  return !!env.FINNHUB_KEY && !q.error && q.timezone === "America/New_York"
+    && FINNHUB_TYPES.has(q.type) && FINNHUB_SYMBOL_RE.test(q.symbol);
+}
+
+async function finnhubQuote(symbol, env) {
+  // Yahoo écrit BRK-B, Finnhub BRK.B
+  const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol.replace("-", "."))}&token=${env.FINNHUB_KEY}`);
+  if (!r.ok) throw new HttpError(502, `Finnhub answered ${r.status}`);
+  const d = await r.json();
+  if (!d || !d.c || !d.t) throw new HttpError(404, "Finnhub returned no quote");
+  return d;
+}
+
+export function mergeFinnhub(q, f) {
+  return { ...q, price: f.c, prev_close: f.pc, change: f.c - f.pc, pct_change: f.pc ? f.c / f.pc - 1 : null,
+    day_high: f.h ?? q.day_high, day_low: f.l ?? q.day_low, time: f.t, source: "Finnhub" };
+}
+
+async function quotes(params, env) {
   const list = need(params, "symbols").split(",").map((s) => s.trim()).filter(Boolean);
   if (!list.length || list.length > MAX_QUOTES || !list.every((s) => SYMBOL_RE.test(s))) {
     throw new HttpError(400, `symbols: 1 to ${MAX_QUOTES} valid tickers`);
   }
   const out = await Promise.all(list.map(async (s) => {
+    let q;
     try {
-      return quoteFromChart(s, await yahoo(`/v8/finance/chart/${encodeURIComponent(s)}?range=1d&interval=5m&includePrePost=false`));
+      q = { ...quoteFromChart(s, await yahoo(`/v8/finance/chart/${encodeURIComponent(s)}?range=1d&interval=5m&includePrePost=false`)), source: "Yahoo Finance" };
     } catch (e) {
       return { symbol: s, error: e.message };
     }
+    if (finnhubEligible(q, env)) {
+      try { q = mergeFinnhub(q, await finnhubQuote(q.symbol, env)); } catch (e) { q.finnhub_error = e.message; }
+    }
+    return q;
   }));
-  return json({ source: "Yahoo Finance", fetched_at: new Date().toISOString(), quotes: out }, TTL.quote);
+  const src = env.FINNHUB_KEY ? "Finnhub (US stocks, real-time) + Yahoo Finance" : "Yahoo Finance";
+  return json({ source: src, fetched_at: new Date().toISOString(), quotes: out }, TTL.quote);
 }
 
 async function chart(params) {
@@ -244,7 +274,7 @@ async function route(url, env) {
   switch (url.pathname) {
     case "/health": return json({ ok: true, time: new Date().toISOString() }, 0);
     case "/search": return search(p);
-    case "/quote": return quotes(p);
+    case "/quote": return quotes(p, env);
     case "/chart": return chart(p);
     case "/news": return news(p);
     case "/sec/concept": {

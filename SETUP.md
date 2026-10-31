@@ -113,3 +113,13 @@ python -m http.server 8000 -d site       # puis http://localhost:8000
 ```
 
 FinBERT en local (environ 1 Go) : `pip install torch transformers` puis `python -m pipeline news`.
+
+## Temps réel des actions US (Finnhub, gratuit)
+
+1. Créer un compte sur https://finnhub.io (gratuit) et copier la clé API du tableau de bord.
+2. Cloudflare > Workers & Pages > atlas-terminal > Settings > Variables and Secrets > Add :
+   type **Secret**, nom **FINNHUB_KEY**, valeur = la clé. Enregistrer (Deploy).
+
+La clé reste dans Cloudflare : elle n'apparaît ni dans le code ni sur le site. Les actions et ETF
+américains passent alors en temps réel (étiquette LIVE, source Finnhub) ; le reste continue via Yahoo.
+Sans clé, ou si Finnhub refuse une requête (limite de 60 par minute), le site reprend Yahoo tout seul.
