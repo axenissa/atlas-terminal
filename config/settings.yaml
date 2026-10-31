@@ -1,0 +1,118 @@
+# ============================================================================
+# Atlas Terminal : paramètres
+# Tout se règle ici, aucun ticker ni seuil n'est codé en dur dans le code.
+# ============================================================================
+
+# --- Univers suivi par le job planifié (GitHub Actions) ---------------------
+# Ces tickers ont un historique en cache, des métriques de risque précalculées
+# et des titres d'actualité notés par FinBERT. Format Yahoo Finance.
+# Tous les autres actifs restent consultables en direct via la barre de recherche.
+universe:
+  - {symbol: AAPL, name: Apple}
+  - {symbol: MSFT, name: Microsoft}
+  - {symbol: NVDA, name: NVIDIA}
+  - {symbol: AMZN, name: Amazon}
+  - {symbol: GOOGL, name: Alphabet}
+  - {symbol: META, name: Meta Platforms}
+  - {symbol: TSLA, name: Tesla}
+  - {symbol: JPM, name: JPMorgan Chase}
+  - {symbol: V, name: Visa}
+  - {symbol: SPY, name: SPDR S&P 500 ETF}
+  - {symbol: QQQ, name: Invesco QQQ}
+  - {symbol: EURUSD=X, name: EUR/USD, news_query: "EUR USD euro dollar"}
+  - {symbol: GBPUSD=X, name: GBP/USD, news_query: "GBP USD pound dollar"}
+  - {symbol: USDJPY=X, name: USD/JPY, news_query: "USD JPY yen"}
+  - {symbol: GC=F, name: Gold futures, news_query: "gold price"}
+  - {symbol: BTC-USD, name: Bitcoin, news_query: "bitcoin price"}
+  - {symbol: ^GSPC, name: S&P 500, news_query: "S&P 500"}
+  - {symbol: ^NDX, name: Nasdaq 100, news_query: "Nasdaq 100"}
+
+# Favoris proposés au premier lancement (ensuite chaque navigateur garde les siens).
+default_watchlist: [AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, JPM, V, SPY, QQQ,
+                    EURUSD=X, GC=F, BTC-USD]
+
+# Bandeau de l'onglet MKTS
+market_board: [SPY, QQQ, DIA, IWM, ^VIX, ^GSPC, ^NDX, ^FCHI, ^STOXX50E,
+               EURUSD=X, DX-Y.NYB, GC=F, CL=F, BTC-USD]
+
+# Indice de référence pour le bêta
+benchmark: SPY
+
+# --- Prix (yfinance) --------------------------------------------------------
+prices:
+  history_period: 5y              # historique quotidien mis en cache
+  batch_pause_seconds: 1.0
+
+# --- Actualités -------------------------------------------------------------
+news:
+  per_ticker: 10
+  google_rss: "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+  default_query: "{symbol} stock"
+  timeout_seconds: 20
+
+# --- Sentiment (FinBERT, open source, CPU) ----------------------------------
+sentiment:
+  model: ProsusAI/finbert
+  batch_size: 16
+  enabled: true                   # false = titres affichés sans note
+  neutral_band: 0.15              # |score moyen| sous ce seuil = neutre
+
+# --- SEC EDGAR ---------------------------------------------------------------
+# La SEC exige un User-Agent descriptif avec un email de contact.
+sec:
+  user_agent: "Atlas Terminal (personal research) axel.lapalus6@gmail.com"
+  tickers_url: "https://www.sec.gov/files/company_tickers.json"
+
+# --- Macro (FRED, CSV public) ------------------------------------------------
+fred:
+  csv_url: "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
+  start: "2000-01-01"
+  series:
+    DFF: Fed funds effective rate
+    DGS1MO: Treasury 1M
+    DGS3MO: Treasury 3M
+    DGS6MO: Treasury 6M
+    DGS1: Treasury 1Y
+    DGS2: Treasury 2Y
+    DGS5: Treasury 5Y
+    DGS10: Treasury 10Y
+    DGS30: Treasury 30Y
+    CPIAUCSL: CPI (all items, SA)
+    UNRATE: Unemployment rate
+  yield_curve: [DGS1MO, DGS3MO, DGS6MO, DGS1, DGS2, DGS5, DGS10, DGS30]
+  risk_free: DGS3MO               # taux sans risque du Sharpe (en %, divisé par 100)
+
+# --- Métriques de risque -----------------------------------------------------
+risk:
+  window_days: 252
+  trading_days_per_year: 252
+
+# --- CB-Monitor ---------------------------------------------------------------
+# Les sorties de CB-Monitor sont lues sur son dépôt GitHub (fichiers bruts).
+# Laisser repo vide pour lire un dossier local (local_path).
+cbmonitor:
+  repo: "axenissa/cb-monitor"
+  branch: main
+  local_path: "../cb-monitor"
+  files:
+    latest: outputs/composite_latest.json
+    history: outputs/composite_history.csv
+    components: outputs/composite_components_history.csv
+    backtest_summary: outputs/backtest/summary.json
+    backtest_equity: outputs/backtest/equity.csv
+  history_resample: W-FRI         # historique hebdomadaire pour alléger la page
+
+# --- Stratégies (onglet STRAT) -------------------------------------------------
+# Chaque stratégie publie un summary.json et un equity.csv au même format que
+# le backtest de CB-Monitor. Ajouter une entrée par nouvelle stratégie.
+strategies:
+  - id: cbm-divergence
+    name: "CB-Monitor divergence (G10 FX)"
+    source: cbmonitor             # lu depuis les fichiers backtest de CB-Monitor
+
+# --- Site -------------------------------------------------------------------
+site:
+  # Adresse du Worker Cloudflare (données en direct, recherche, FA, news de tout ticker).
+  # Vide = le site n'affiche que les données en cache de l'univers ci-dessus.
+  worker_url: ""
+  live_refresh_seconds: 15        # rafraîchissement des cotations en direct

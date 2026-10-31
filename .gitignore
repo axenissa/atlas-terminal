@@ -1,0 +1,11 @@
+# données générées : publiées sur la branche "data" par GitHub Actions
+site/data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+worker/node_modules/
+worker/.wrangler/
+.DS_Store
+.env

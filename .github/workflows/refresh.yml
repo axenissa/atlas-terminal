@@ -1,0 +1,113 @@
+name: Refresh data and deploy
+
+# Horaires en UTC. Les cotations en direct passent par le Worker ;
+# ce job alimente le cache (historique, risque, FinBERT, macro, SEC, CB-Monitor).
+on:
+  schedule:
+    - cron: "*/15 13-21 * * 1-5"   # prix + risque, séance américaine
+    - cron: "7,37 * * * *"         # actualités + sentiment FinBERT
+    - cron: "23 22 * * *"          # macro, SEC, CB-Monitor (après la mise à jour de CB-Monitor à 21h17)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "prices | news | daily | all"
+        default: all
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  actions: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mode
+        id: mode
+        run: |
+          case "${{ github.event.schedule }}" in
+            "*/15 13-21 * * 1-5") m=prices ;;
+            "7,37 * * * *")       m=news ;;
+            "23 22 * * *")        m=daily ;;
+            *)                    m="${{ github.event.inputs.mode || 'all' }}" ;;
+          esac
+          echo "mode=$m" >> $GITHUB_OUTPUT
+          echo "Mode: $m"
+
+      - name: Données précédentes (branche data)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: data
+          path: site/data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dépendances
+        run: pip install -r requirements.txt
+
+      - name: FinBERT (torch CPU)
+        if: steps.mode.outputs.mode == 'news' || steps.mode.outputs.mode == 'all'
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-sentiment.txt
+
+      - name: Cache du modèle FinBERT
+        if: steps.mode.outputs.mode == 'news' || steps.mode.outputs.mode == 'all'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-prosusai-finbert
+
+      - name: Collecte
+        env:
+          CBM_TOKEN: ${{ secrets.CBM_TOKEN }}
+        run: python -m pipeline ${{ steps.mode.outputs.mode }}
+
+      - name: Contrôle croisé (prix et volatilité 1 an)
+        if: steps.mode.outputs.mode == 'daily' || steps.mode.outputs.mode == 'all'
+        continue-on-error: true
+        run: |
+          python -m pipeline.crosscheck AAPL | tee crosscheck.log
+          echo "## Cross-check" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat crosscheck.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Publication des données (branche data, un seul commit)
+        run: |
+          cd site/data
+          [ -d .git ] || { git init -q; git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"; }
+          git config user.name "atlas-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -q --orphan snapshot
+          git add -A
+          git commit -qm "data $(date -u +%FT%TZ)"
+          git branch -M data
+          git push -qf origin data
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      # GitHub met en pause les tâches planifiées après 60 jours sans activité : on les garde actives
+      - uses: gautamkrishnar/keepalive-workflow@v2
+        if: steps.mode.outputs.mode == 'daily'
+        continue-on-error: true

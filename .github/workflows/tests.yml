@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt
+      - name: Tests Python (métriques de risque, formats des sources)
+        run: python -m pytest -v | tee pytest.log
+      - name: Tests JavaScript (métriques navigateur, fondamentaux SEC, Worker)
+        run: node --test tests-js/*.test.mjs | tee node.log
+      - name: Résumé
+        if: always()
+        run: |
+          echo "## Tests" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 3 pytest.log >> $GITHUB_STEP_SUMMARY
+          grep -E "^# (tests|pass|fail)" node.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
