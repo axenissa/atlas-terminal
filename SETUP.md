@@ -99,7 +99,7 @@ C'est fini : le Mac peut rester éteint.
 - Ajouter un actif au suivi complet (historique en cache, risque, sentiment FinBERT) : `universe` dans `config/settings.yaml`.
 - Favoris : directement dans le site (☆), gardés dans ton navigateur.
 - Nouvelle stratégie dans STRAT : une entrée dans `strategies`, avec un `summary.json` et un `equity.csv` au format de CB-Monitor.
-- GitHub met en pause les tâches planifiées d'un dépôt sans activité pendant 60 jours ; le workflow s'en charge, sinon un mail de GitHub propose de les réactiver en un clic.
+- GitHub met en pause les tâches planifiées d'un dépôt sans commit pendant 60 jours : un mail de GitHub propose alors de les réactiver en un clic.
 
 ## Lancer en local (facultatif)
 
