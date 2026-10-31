@@ -8,4 +8,4 @@ compatibility_date = "2024-09-23"
 SEC_USER_AGENT = "Atlas Terminal (personal research) axel.lapalus6@gmail.com"
 # Origines autorisées, séparées par des virgules ("*" = toutes).
 # Après la mise en ligne, mettre l'adresse GitHub Pages, ex : "https://pseudo.github.io"
-ALLOWED_ORIGINS = "*"
+ALLOWED_ORIGINS = "https://axenissa.github.io"

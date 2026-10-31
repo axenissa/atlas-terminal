@@ -114,5 +114,5 @@ strategies:
 site:
   # Adresse du Worker Cloudflare (données en direct, recherche, FA, news de tout ticker).
   # Vide = le site n'affiche que les données en cache de l'univers ci-dessus.
-  worker_url: ""
+  worker_url: "https://atlas-terminal.axenissa.workers.dev"
   live_refresh_seconds: 15        # rafraîchissement des cotations en direct
