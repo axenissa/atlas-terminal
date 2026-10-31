@@ -72,14 +72,26 @@ function marketState(meta, nowSec) {
   return "CLOSED";
 }
 
-function quoteFromChart(symbol, data) {
+// Clôture de la veille. chartPreviousClose est la clôture avant le début de la plage demandée :
+// ce n'est la veille que pour range=1d. Sur un graphique quotidien, on prend l'avant-dernière barre.
+function previousClose(res, range) {
+  const m = res.meta;
+  if (range === "1d") return m.chartPreviousClose ?? m.previousClose ?? null;
+  if (m.previousClose != null) return m.previousClose;
+  const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+  const closes = (q.close || []).filter((x) => x != null);
+  const daily = m.dataGranularity === "1d" || (res.timestamp || []).length < 2 || (res.timestamp[1] - res.timestamp[0]) >= 86400;
+  return daily && closes.length >= 2 ? closes[closes.length - 2] : null;
+}
+
+function quoteFromChart(symbol, data, range = "1d") {
   const res = data && data.chart && data.chart.result && data.chart.result[0];
   if (!res) {
     const err = data && data.chart && data.chart.error;
     return { symbol, error: err ? err.description : "no data" };
   }
   const m = res.meta;
-  const prev = m.chartPreviousClose ?? m.previousClose ?? null;
+  const prev = previousClose(res, range);
   const price = m.regularMarketPrice ?? null;
   return {
     symbol: m.symbol || symbol,
@@ -130,7 +142,7 @@ async function chart(params) {
   const body = {
     source: "Yahoo Finance",
     fetched_at: new Date().toISOString(),
-    quote: quoteFromChart(symbol, data),
+    quote: quoteFromChart(symbol, data, range),
     t: res.timestamp || [],
     open: q.open || [], high: q.high || [], low: q.low || [], close: q.close || [],
     adjclose: adj || q.close || [], volume: q.volume || [],

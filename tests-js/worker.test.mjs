@@ -63,3 +63,14 @@ test("FRED : page HTML anti-robot signalée comme erreur", async () => {
   assert.equal(r.status, 502);
   assert.match((await r.json()).error, /HTML/);
 });
+
+test("chart 5 ans : la clôture précédente est l'avant-dernière barre, pas celle d'il y a 5 ans", async () => {
+  const p = chartPayload("MC.PA", 387, 677.2);
+  p.chart.result[0].meta.dataGranularity = "1d";
+  p.chart.result[0].indicators.quote[0].close = [380, 392.5, 387];
+  p.chart.result[0].timestamp = [1, 86401, 172801];
+  routes = { "/v8/finance/chart/MC.PA": () => Response.json(p) };
+  const b = await (await get("/chart?symbol=MC.PA&range=5y&interval=1d")).json();
+  assert.equal(b.quote.prev_close, 392.5);
+  assert.ok(Math.abs(b.quote.pct_change - (387 / 392.5 - 1)) < 1e-12);
+});
